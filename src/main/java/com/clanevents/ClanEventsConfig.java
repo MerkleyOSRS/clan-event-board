@@ -5,7 +5,7 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 
-@ConfigGroup("clan-events")
+@ConfigGroup("clan-event-board")
 public interface ClanEventsConfig extends Config
 {
 	@ConfigSection(

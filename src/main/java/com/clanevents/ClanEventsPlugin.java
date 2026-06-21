@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @PluginDescriptor(
-	name = "Clan Events",
+	name = "Clan Event Board",
 	description = "Shared clan event scheduling with RSVP, reminders, and Discord notifications",
 	tags = {"clan", "events", "schedule", "rsvp", "social"}
 )
