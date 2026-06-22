@@ -194,12 +194,14 @@ public class EventCardPanel extends JPanel
 		expandedSection.setVisible(expanded);
 		chevronLbl.setText(expanded ? "▼" : "▶"); // ▼ : ▶
 		// Lift the max-height constraint while expanded so the card can grow freely
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, expanded ? Integer.MAX_VALUE : COLLAPSED_H));
+		setMaximumSize(new Dimension(Integer.MAX_VALUE, expanded ? Short.MAX_VALUE : COLLAPSED_H));
 		revalidate();
+		repaint();
 		Container p = getParent();
 		if (p != null)
 		{
 			p.revalidate();
+			p.repaint();
 		}
 	}
 

@@ -275,20 +275,36 @@ public class ClanEventsPlugin extends Plugin
 	{
 		if (!isConfigured())
 		{
+			if (panel != null)
+			{
+				panel.showError("Plugin not configured — add JSONBin credentials in settings.");
+			}
 			return;
 		}
+
 		final String username = cachedUsername;
 		if (username == null)
 		{
+			// Cache may not have been populated yet; schedule a refresh and tell the user to retry.
+			clientThread.invoke(this::cachePlayerInfo);
+			if (panel != null)
+			{
+				panel.showError("Player info not ready — please try again in a moment.");
+			}
+			log.warn("rsvpEvent: cachedUsername is null, requested cache refresh");
 			return;
 		}
+
+		log.info("RSVP triggered by {} for event '{}' (id={})", username, event.title, event.id);
 
 		jsonBinClient.fetchEvents(config.binId(), config.apiKey(), data ->
 		{
 			data.events.removeIf(e -> e.id == null || e.title == null || e.host == null);
+
+			boolean matched = false;
 			for (ClanEvent e : data.events)
 			{
-				if (Objects.equals(e.id, event.id)) // H2 fix: null-safe ID comparison
+				if (Objects.equals(e.id, event.id))
 				{
 					if (e.rsvps.contains(username))
 					{
@@ -298,13 +314,26 @@ public class ClanEventsPlugin extends Plugin
 					{
 						e.rsvps.add(username);
 					}
+					matched = true;
 					break;
 				}
 			}
-			// H1/H4 fix: panel update and cache write are inside save success; show error + re-sync on failure
+
+			if (!matched)
+			{
+				log.warn("rsvpEvent: event id={} not found in fresh fetch; data may be stale", event.id);
+				if (panel != null)
+				{
+					panel.showError("Event not found — refreshing list.");
+				}
+				fetchEvents();
+				return;
+			}
+
 			jsonBinClient.saveEvents(config.binId(), config.apiKey(), data,
 				() ->
 				{
+					log.info("RSVP saved for event '{}'", event.title);
 					eventsData = data;
 					fetchEvents();
 				},
