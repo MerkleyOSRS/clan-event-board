@@ -10,72 +10,78 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public class EventCardPanel extends JPanel
 {
-	private static final DateTimeFormatter TIME_FMT =
-		DateTimeFormatter.ofPattern("EEE dd MMM, h:mm a z");
-	private static final Color CARD_BG = new Color(0x2A2A2A);
-	private static final Color RSVP_COLOR = new Color(0x1ABC9C);
-
-	private final ClanEvent event;
-	private boolean expanded = false;
+	private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("EEE dd MMM");
+	private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("h:mm a z");
+	private static final Color TEAL = new Color(0x1ABC9C);
+	private static final Color DELETE_RED = new Color(0xC0392B);
 
 	private final JPanel expandedSection;
-	private final JButton rsvpBtn;
+	private boolean expanded = false;
 
 	EventCardPanel(ClanEvent event, String currentUsername, boolean canDelete,
 		Consumer<ClanEvent> onRsvp, Consumer<ClanEvent> onDelete)
 	{
-		this.event = event;
+		setLayout(new BorderLayout());
+		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// Top margin between cards — same pattern as PartyMemberBox
+		setBorder(new EmptyBorder(5, 0, 0, 0));
 
-		setLayout(new BorderLayout(0, 0));
-		setBackground(CARD_BG);
-		setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.DARK_GRAY_COLOR),
-			new EmptyBorder(6, 8, 6, 8)
-		));
+		// Inner container — darker card background with internal padding
+		JPanel container = new JPanel(new BorderLayout(0, 0));
+		container.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		container.setBorder(new EmptyBorder(7, 7, 7, 7));
 
-		// --- Collapsed header row ---
+		// --- Header (always visible) ---
 		JPanel header = new JPanel(new BorderLayout(4, 0));
-		header.setBackground(CARD_BG);
+		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-		JPanel titleRow = new JPanel();
-		titleRow.setLayout(new BoxLayout(titleRow, BoxLayout.Y_AXIS));
-		titleRow.setBackground(CARD_BG);
+		// Left: event info stacked vertically
+		JPanel infoPanel = new JPanel();
+		infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
+		infoPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
 		JLabel titleLabel = new JLabel(event.title);
-		titleLabel.setForeground(Color.WHITE);
 		titleLabel.setFont(FontManager.getRunescapeBoldFont());
+		titleLabel.setForeground(Color.WHITE);
+		titleLabel.putClientProperty("html.disable", Boolean.TRUE);
 
 		ZonedDateTime zdt = ZonedDateTime.ofInstant(
 			Instant.ofEpochSecond(event.timestampUtc), ZoneId.systemDefault());
+
+		JLabel dateLabel = new JLabel(DATE_FMT.format(zdt));
+		dateLabel.setFont(FontManager.getRunescapeSmallFont());
+		dateLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+
 		JLabel timeLabel = new JLabel(TIME_FMT.format(zdt));
-		timeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		timeLabel.setFont(FontManager.getRunescapeSmallFont());
+		timeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 
 		JLabel hostLabel = new JLabel("Host: " + event.host);
-		hostLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		hostLabel.setFont(FontManager.getRunescapeSmallFont());
+		hostLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		hostLabel.putClientProperty("html.disable", Boolean.TRUE);
 
-		titleRow.add(titleLabel);
-		titleRow.add(Box.createVerticalStrut(2));
-		titleRow.add(timeLabel);
-		titleRow.add(Box.createVerticalStrut(1));
-		titleRow.add(hostLabel);
+		infoPanel.add(titleLabel);
+		infoPanel.add(Box.createVerticalStrut(2));
+		infoPanel.add(dateLabel);
+		infoPanel.add(timeLabel);
+		infoPanel.add(Box.createVerticalStrut(2));
+		infoPanel.add(hostLabel);
 
-		// RSVP count badge
+		// Right: RSVP count
 		JLabel countLabel = new JLabel(event.rsvps.size() + " going");
-		countLabel.setForeground(RSVP_COLOR);
 		countLabel.setFont(FontManager.getRunescapeSmallFont());
-		countLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+		countLabel.setForeground(event.rsvps.isEmpty() ? ColorScheme.MEDIUM_GRAY_COLOR : TEAL);
+		countLabel.setVerticalAlignment(SwingConstants.TOP);
 
-		header.add(titleRow, BorderLayout.CENTER);
+		header.add(infoPanel, BorderLayout.CENTER);
 		header.add(countLabel, BorderLayout.EAST);
 
-		// Make header clickable to expand
+		// Click header to expand/collapse
 		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		header.addMouseListener(new java.awt.event.MouseAdapter()
 		{
@@ -89,22 +95,29 @@ public class EventCardPanel extends JPanel
 		// --- Expanded section ---
 		expandedSection = new JPanel();
 		expandedSection.setLayout(new BoxLayout(expandedSection, BoxLayout.Y_AXIS));
-		expandedSection.setBackground(CARD_BG);
+		expandedSection.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		expandedSection.setBorder(new EmptyBorder(6, 0, 0, 0));
 		expandedSection.setVisible(false);
 
-		// Attendees list
-		JLabel attendeesTitle = new JLabel("Attending (" + event.rsvps.size() + "):");
-		attendeesTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		// Thin separator line
+		JSeparator sep = new JSeparator();
+		sep.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+		expandedSection.add(sep);
+		expandedSection.add(Box.createVerticalStrut(6));
+
+		// Attendees
+		JLabel attendeesTitle = new JLabel("Attending (" + event.rsvps.size() + ")");
 		attendeesTitle.setFont(FontManager.getRunescapeSmallFont());
+		attendeesTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		expandedSection.add(attendeesTitle);
-		expandedSection.add(Box.createVerticalStrut(2));
+		expandedSection.add(Box.createVerticalStrut(3));
 
 		if (event.rsvps.isEmpty())
 		{
-			JLabel noneLabel = new JLabel("No RSVPs yet");
-			noneLabel.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+			JLabel noneLabel = new JLabel("No one yet — be the first!");
 			noneLabel.setFont(FontManager.getRunescapeSmallFont());
+			noneLabel.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
 			expandedSection.add(noneLabel);
 		}
 		else
@@ -112,45 +125,36 @@ public class EventCardPanel extends JPanel
 			for (String name : event.rsvps)
 			{
 				JLabel nameLabel = new JLabel("• " + name);
-				nameLabel.setForeground(Color.WHITE);
 				nameLabel.setFont(FontManager.getRunescapeSmallFont());
+				nameLabel.setForeground(Color.WHITE);
+				nameLabel.putClientProperty("html.disable", Boolean.TRUE);
 				expandedSection.add(nameLabel);
 			}
 		}
 
-		expandedSection.add(Box.createVerticalStrut(6));
+		expandedSection.add(Box.createVerticalStrut(8));
 
-		// RSVP / Un-RSVP button
-		boolean alreadyRsvpd = event.rsvps.contains(currentUsername);
-		rsvpBtn = new JButton(alreadyRsvpd ? "Un-RSVP" : "RSVP");
-		rsvpBtn.setBackground(alreadyRsvpd ? ColorScheme.MEDIUM_GRAY_COLOR : RSVP_COLOR);
-		rsvpBtn.setForeground(Color.WHITE);
-		rsvpBtn.setFont(FontManager.getRunescapeSmallFont());
-		rsvpBtn.setBorderPainted(false);
-		rsvpBtn.setFocusPainted(false);
-		rsvpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		rsvpBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		// RSVP button
+		boolean alreadyRsvpd = currentUsername != null && event.rsvps.contains(currentUsername);
+		JButton rsvpBtn = new JButton(alreadyRsvpd ? "Remove RSVP" : "RSVP");
+		styleButton(rsvpBtn, alreadyRsvpd ? ColorScheme.MEDIUM_GRAY_COLOR : TEAL);
 		rsvpBtn.addActionListener(e -> onRsvp.accept(event));
 		expandedSection.add(rsvpBtn);
 
-		// Delete button (only if permitted)
+		// Delete button
 		if (canDelete)
 		{
 			expandedSection.add(Box.createVerticalStrut(4));
 			JButton deleteBtn = new JButton("Delete Event");
-			deleteBtn.setBackground(new Color(0xC0392B));
-			deleteBtn.setForeground(Color.WHITE);
-			deleteBtn.setFont(FontManager.getRunescapeSmallFont());
-			deleteBtn.setBorderPainted(false);
-			deleteBtn.setFocusPainted(false);
-			deleteBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-			deleteBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+			styleButton(deleteBtn, DELETE_RED);
 			deleteBtn.addActionListener(e -> onDelete.accept(event));
 			expandedSection.add(deleteBtn);
 		}
 
-		add(header, BorderLayout.NORTH);
-		add(expandedSection, BorderLayout.CENTER);
+		container.add(header, BorderLayout.CENTER);
+		container.add(expandedSection, BorderLayout.SOUTH);
+
+		add(container, BorderLayout.CENTER);
 	}
 
 	private void toggleExpanded()
@@ -158,13 +162,22 @@ public class EventCardPanel extends JPanel
 		expanded = !expanded;
 		expandedSection.setVisible(expanded);
 		revalidate();
-		repaint();
-
-		// Notify parent scroll pane to adjust
 		Container parent = getParent();
 		if (parent != null)
 		{
 			parent.revalidate();
 		}
+	}
+
+	private static void styleButton(JButton btn, Color bg)
+	{
+		btn.setBackground(bg);
+		btn.setForeground(Color.WHITE);
+		btn.setFont(FontManager.getRunescapeSmallFont());
+		btn.setBorderPainted(false);
+		btn.setFocusPainted(false);
+		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 	}
 }

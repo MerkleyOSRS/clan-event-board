@@ -2,6 +2,7 @@ package com.clanevents;
 
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 
@@ -14,6 +15,9 @@ import java.util.Set;
 @Slf4j
 public class ReminderManager
 {
+	@Inject
+	private ClientThread clientThread;
+
 	@Inject
 	private ChatMessageManager chatMessageManager;
 
@@ -74,10 +78,10 @@ public class ReminderManager
 		String timeLabel = formatMinutes(minutesBefore);
 		String message = "[Clan Events] Reminder: \"" + event.title + "\" starts in " + timeLabel + "!";
 
-		chatMessageManager.queue(QueuedMessage.builder()
+		clientThread.invoke(() -> chatMessageManager.queue(QueuedMessage.builder()
 			.type(ChatMessageType.GAMEMESSAGE)
 			.runeLiteFormattedMessage(message)
-			.build());
+			.build()));
 
 		String webhookUrl = config.discordWebhookUrl();
 		if (!webhookUrl.isEmpty())

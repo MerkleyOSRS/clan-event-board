@@ -40,12 +40,12 @@ public class ClanEventsPanel extends PluginPanel
 		listView.add(buildListHeader(), BorderLayout.NORTH);
 
 		eventListPanel.setLayout(new BoxLayout(eventListPanel, BoxLayout.Y_AXIS));
-		eventListPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		eventListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		JScrollPane scroll = new JScrollPane(eventListPanel);
 		scroll.setBorder(null);
-		scroll.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		scroll.getViewport().setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
 
 		listView.add(scroll, BorderLayout.CENTER);

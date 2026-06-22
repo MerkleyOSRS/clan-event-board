@@ -11,6 +11,7 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -55,6 +56,9 @@ public class ClanEventsPlugin extends Plugin
 
 	@Inject
 	private ReminderManager reminderManager;
+
+	@Inject
+	private ClientThread clientThread;
 
 	@Inject
 	private ChatMessageManager chatMessageManager;
@@ -305,11 +309,11 @@ public class ClanEventsPlugin extends Plugin
 
 	private void notifyCreated(ClanEvent event)
 	{
-		String msg = "[Clan Events] \"" + event.title + "\" has been scheduled by " + event.host + ".";
-		chatMessageManager.queue(QueuedMessage.builder()
+		String msg = "[Clan Event Board] \"" + event.title + "\" has been scheduled by " + event.host + ".";
+		clientThread.invoke(() -> chatMessageManager.queue(QueuedMessage.builder()
 			.type(ChatMessageType.GAMEMESSAGE)
 			.runeLiteFormattedMessage(msg)
-			.build());
+			.build()));
 
 		String webhookUrl = config.discordWebhookUrl();
 		if (webhookUrl != null && !webhookUrl.isEmpty())
