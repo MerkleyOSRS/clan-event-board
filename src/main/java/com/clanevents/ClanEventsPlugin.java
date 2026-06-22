@@ -7,12 +7,14 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.clan.ClanChannelMember;
+import net.runelite.api.events.ClanChannelChanged;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
-import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -25,6 +27,7 @@ import java.awt.image.BufferedImage;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -69,22 +72,24 @@ public class ClanEventsPlugin extends Plugin
 	private ScheduledFuture<?> pollFuture;
 	private ScheduledFuture<?> reminderFuture;
 
-	// In-memory cache of current events
 	private volatile ClanEventsData eventsData = new ClanEventsData();
+	// C1 fix: cache client-thread-only values so they can safely be read from EDT / OkHttp threads
+	private volatile String cachedUsername = null;
+	private volatile boolean cachedCanAdminDelete = false;
 
 	@Override
 	protected void startUp()
 	{
+		eventsData = new ClanEventsData(); // M3 fix: reset stale cache on re-enable
 		panel = new ClanEventsPanel(this);
 		navButton = NavigationButton.builder()
-			.tooltip("Clan Events")
+			.tooltip("Clan Event Board")
 			.icon(buildIcon())
 			.priority(6)
 			.panel(panel)
 			.build();
 
 		clientToolbar.addNavigation(navButton);
-
 		executor = Executors.newSingleThreadScheduledExecutor();
 
 		if (isConfigured())
@@ -127,13 +132,59 @@ public class ClanEventsPlugin extends Plugin
 	{
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
-			// Re-check reminders after login so stale ones don't fire
+			cachePlayerInfo(); // safe: event subscribers are dispatched on client thread
 			reminderManager.clearFiredReminders();
 			if (isConfigured() && pollFuture == null)
 			{
 				startPolling();
 			}
 		}
+	}
+
+	@Subscribe
+	public void onClanChannelChanged(ClanChannelChanged event)
+	{
+		// Re-cache in case the local player's rank changed
+		cachePlayerInfo();
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!event.getGroup().equals("clan-event-board"))
+		{
+			return;
+		}
+		// Re-compute admin delete permission in case minAdminRank changed
+		cachePlayerInfo();
+		// M2 fix: start polling immediately when credentials are first entered
+		if (isConfigured() && pollFuture == null)
+		{
+			startPolling();
+			panel.showLoading();
+		}
+	}
+
+	// Must only be called on the client thread
+	private void cachePlayerInfo()
+	{
+		cachedUsername = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+		cachedCanAdminDelete = computeCanAdminDelete();
+	}
+
+	private boolean computeCanAdminDelete()
+	{
+		ClanChannel channel = client.getClanChannel();
+		if (channel == null || cachedUsername == null)
+		{
+			return false;
+		}
+		ClanChannelMember member = channel.findMember(cachedUsername);
+		if (member == null)
+		{
+			return false;
+		}
+		return member.getRank().getRank() >= config.minAdminRank().getMinRankValue();
 	}
 
 	private void startPolling()
@@ -150,11 +201,15 @@ public class ClanEventsPlugin extends Plugin
 			return;
 		}
 
+		// Snapshot volatile fields before the async boundary so the callback closure captures consistent values
+		final boolean canAdminDelete = cachedCanAdminDelete;
+
 		jsonBinClient.fetchEvents(
 			config.binId(),
 			config.apiKey(),
 			data ->
 			{
+				data.events.removeIf(e -> e.id == null || e.title == null || e.host == null); // H2 fix
 				eventsData = data;
 				long nowSeconds = Instant.now().getEpochSecond();
 
@@ -167,7 +222,7 @@ public class ClanEventsPlugin extends Plugin
 
 				if (panel != null)
 				{
-					panel.setEvents(upcoming, getCurrentUsername());
+					panel.setEvents(upcoming, cachedUsername, canAdminDelete);
 				}
 			},
 			() ->
@@ -192,20 +247,24 @@ public class ClanEventsPlugin extends Plugin
 		updated.events.addAll(eventsData.events);
 		updated.events.add(event);
 
+		// C2 fix: all post-create work lives inside the success callback so it only runs after PUT completes
 		jsonBinClient.saveEvents(config.binId(), config.apiKey(), updated,
 			() ->
 			{
-				panel.showError("Failed to save event.");
+				eventsData = updated;
+				fetchEvents();
+				notifyCreated(event);
+				onSuccess.run();
+			},
+			() ->
+			{
+				if (panel != null)
+				{
+					panel.showError("Failed to save event.");
+				}
 				onFailure.run();
 			}
 		);
-
-		// Optimistically update local cache and panel
-		eventsData = updated;
-		fetchEvents();
-
-		notifyCreated(event);
-		onSuccess.run();
 	}
 
 	public void rsvpEvent(ClanEvent event)
@@ -214,18 +273,18 @@ public class ClanEventsPlugin extends Plugin
 		{
 			return;
 		}
-		String username = getCurrentUsername();
+		final String username = cachedUsername;
 		if (username == null)
 		{
 			return;
 		}
 
-		// Read-modify-write: fetch fresh copy, toggle RSVP, save back
 		jsonBinClient.fetchEvents(config.binId(), config.apiKey(), data ->
 		{
+			data.events.removeIf(e -> e.id == null || e.title == null || e.host == null);
 			for (ClanEvent e : data.events)
 			{
-				if (e.id.equals(event.id))
+				if (Objects.equals(e.id, event.id)) // H2 fix: null-safe ID comparison
 				{
 					if (e.rsvps.contains(username))
 					{
@@ -238,21 +297,31 @@ public class ClanEventsPlugin extends Plugin
 					break;
 				}
 			}
-			jsonBinClient.saveEvents(config.binId(), config.apiKey(), data, () ->
-				log.debug("Failed to save RSVP for event {}", event.id));
-
-			eventsData = data;
-			long nowSeconds = Instant.now().getEpochSecond();
-			List<ClanEvent> upcoming = data.events.stream()
-				.filter(e -> e.timestampUtc > nowSeconds)
-				.sorted(Comparator.comparingLong(e -> e.timestampUtc))
-				.collect(Collectors.toList());
-
+			// H1/H4 fix: panel update and cache write are inside save success; show error + re-sync on failure
+			jsonBinClient.saveEvents(config.binId(), config.apiKey(), data,
+				() ->
+				{
+					eventsData = data;
+					fetchEvents();
+				},
+				() ->
+				{
+					log.warn("Failed to save RSVP for event {}", event.id);
+					if (panel != null)
+					{
+						panel.showError("RSVP failed — please try again.");
+					}
+					fetchEvents();
+				}
+			);
+		}, () ->
+		{
+			log.warn("Failed to fetch events for RSVP update");
 			if (panel != null)
 			{
-				panel.setEvents(upcoming, username);
+				panel.showError("Failed to load events — check connection.");
 			}
-		}, () -> log.debug("Failed to fetch events for RSVP update"));
+		});
 	}
 
 	public void deleteEvent(ClanEvent event)
@@ -265,46 +334,34 @@ public class ClanEventsPlugin extends Plugin
 		ClanEventsData updated = new ClanEventsData();
 		for (ClanEvent e : eventsData.events)
 		{
-			if (!e.id.equals(event.id))
+			if (!Objects.equals(e.id, event.id)) // H2 fix: null-safe ID comparison
 			{
 				updated.events.add(e);
 			}
 		}
 
-		jsonBinClient.saveEvents(config.binId(), config.apiKey(), updated, () ->
-			log.debug("Failed to delete event {}", event.id));
-
-		eventsData = updated;
-		fetchEvents();
-	}
-
-	public boolean currentUserCanAdminDelete()
-	{
-		ClanChannel channel = client.getClanChannel();
-		if (channel == null)
-		{
-			return false;
-		}
-		String username = getCurrentUsername();
-		if (username == null)
-		{
-			return false;
-		}
-		ClanChannelMember member = channel.findMember(username);
-		if (member == null)
-		{
-			return false;
-		}
-		return member.getRank().getRank() >= config.minAdminRank().getMinRankValue();
+		// H1/H4 fix: fetchEvents inside success callback so GET doesn't race the pending PUT
+		jsonBinClient.saveEvents(config.binId(), config.apiKey(), updated,
+			() ->
+			{
+				eventsData = updated;
+				fetchEvents();
+			},
+			() ->
+			{
+				log.warn("Failed to delete event {}", event.id);
+				if (panel != null)
+				{
+					panel.showError("Delete failed — please try again.");
+				}
+				fetchEvents();
+			}
+		);
 	}
 
 	public String getCurrentUsername()
 	{
-		if (client.getLocalPlayer() == null)
-		{
-			return null;
-		}
-		return client.getLocalPlayer().getName();
+		return cachedUsername;
 	}
 
 	private void notifyCreated(ClanEvent event)

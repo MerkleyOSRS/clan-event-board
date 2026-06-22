@@ -1,5 +1,6 @@
 package com.clanevents;
 
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
@@ -9,6 +10,7 @@ import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.util.List;
 
+@Slf4j
 public class ClanEventsPanel extends PluginPanel
 {
 	private static final String CARD_LIST = "list";
@@ -17,6 +19,7 @@ public class ClanEventsPanel extends PluginPanel
 	private final CardLayout cardLayout = new CardLayout();
 	private final JPanel cardContainer = new JPanel(cardLayout);
 
+	private final JPanel listView; // L3 fix: field reference so showCreateForm can safely remove non-listView components
 	private final JPanel eventListPanel = new JPanel();
 	private final JLabel statusLabel = new JLabel();
 	private EventCreatePanel createPanel;
@@ -34,7 +37,7 @@ public class ClanEventsPanel extends PluginPanel
 		cardContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
 		// --- List view ---
-		JPanel listView = new JPanel(new BorderLayout(0, 4));
+		listView = new JPanel(new BorderLayout(0, 4));
 		listView.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
 		listView.add(buildListHeader(), BorderLayout.NORTH);
@@ -68,7 +71,7 @@ public class ClanEventsPanel extends PluginPanel
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		header.setBorder(new EmptyBorder(8, 8, 8, 8));
 
-		JLabel title = new JLabel("Clan Events");
+		JLabel title = new JLabel("Clan Event Board"); // L1 fix: match plugin display name
 		title.setForeground(Color.WHITE);
 		title.setFont(FontManager.getRunescapeBoldFont());
 
@@ -86,7 +89,8 @@ public class ClanEventsPanel extends PluginPanel
 		return header;
 	}
 
-	public void setEvents(List<ClanEvent> events, String currentUsername)
+	// C1 fix: canAdminDelete passed in as a pre-computed parameter instead of calling client API from EDT
+	public void setEvents(List<ClanEvent> events, String currentUsername, boolean canAdminDelete)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
@@ -106,13 +110,21 @@ public class ClanEventsPanel extends PluginPanel
 			{
 				for (ClanEvent event : events)
 				{
-					boolean isHost = event.host.equalsIgnoreCase(currentUsername);
-					boolean canDelete = isHost || plugin.currentUserCanAdminDelete();
-					EventCardPanel card = new EventCardPanel(event, currentUsername, canDelete,
-						plugin::rsvpEvent, plugin::deleteEvent);
-					card.setAlignmentX(Component.LEFT_ALIGNMENT);
-					card.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-					eventListPanel.add(card);
+					try // L6 fix: catch card-construction errors so one bad event doesn't blank the whole list
+					{
+						boolean isHost = currentUsername != null && event.host != null
+							&& event.host.equalsIgnoreCase(currentUsername);
+						boolean canDelete = isHost || canAdminDelete;
+						EventCardPanel card = new EventCardPanel(event, currentUsername, canDelete,
+							plugin::rsvpEvent, plugin::deleteEvent);
+						card.setAlignmentX(Component.LEFT_ALIGNMENT);
+						card.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+						eventListPanel.add(card);
+					}
+					catch (Exception ex)
+					{
+						log.warn("Error building event card for '{}'", event.title, ex);
+					}
 				}
 			}
 
@@ -159,13 +171,10 @@ public class ClanEventsPanel extends PluginPanel
 
 	private void showCreateForm()
 	{
-		String username = plugin.getCurrentUsername();
-
 		createPanel = new EventCreatePanel(
-			username,
+			plugin.getCurrentUsername(),
 			event ->
 			{
-				// Disable the form while saving
 				createPanel.setStatus("Saving...", false);
 				plugin.createEvent(event,
 					() -> SwingUtilities.invokeLater(this::showList),
@@ -174,10 +183,14 @@ public class ClanEventsPanel extends PluginPanel
 			this::showList
 		);
 
-		// Replace previous create panel if any
-		cardContainer.remove(cardContainer.getComponentCount() > 1
-			? cardContainer.getComponent(1)
-			: createPanel);
+		// L3 fix: iterate over a snapshot array rather than relying on component index order
+		for (Component c : cardContainer.getComponents())
+		{
+			if (c != listView)
+			{
+				cardContainer.remove(c);
+			}
+		}
 		cardContainer.add(createPanel, CARD_CREATE);
 		cardLayout.show(cardContainer, CARD_CREATE);
 	}

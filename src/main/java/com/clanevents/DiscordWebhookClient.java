@@ -56,7 +56,7 @@ public class DiscordWebhookClient
 				{
 					reminderStr.append(", ");
 				}
-				reminderStr.append(formatMinutes(mins));
+				reminderStr.append(EventFormatUtils.formatMinutes(mins)); // L2 fix: use shared utility
 			}
 			JsonObject reminderField = new JsonObject();
 			reminderField.addProperty("name", "Reminders");
@@ -68,7 +68,7 @@ public class DiscordWebhookClient
 		embed.add("fields", fields);
 
 		JsonObject footer = new JsonObject();
-		footer.addProperty("text", "RSVP in-game via the Clan Events plugin");
+		footer.addProperty("text", "RSVP in-game via the Clan Event Board plugin");
 		embed.add("footer", footer);
 
 		JsonArray embeds = new JsonArray();
@@ -84,7 +84,7 @@ public class DiscordWebhookClient
 	public void postReminder(String webhookUrl, ClanEvent event, int minutesBefore, boolean pingHere)
 	{
 		String ping = pingHere ? "@here " : "";
-		String timeLabel = formatMinutes(minutesBefore);
+		String timeLabel = EventFormatUtils.formatMinutes(minutesBefore); // L2 fix
 
 		JsonObject payload = new JsonObject();
 		payload.addProperty("content",
@@ -95,10 +95,21 @@ public class DiscordWebhookClient
 
 	private void post(String webhookUrl, JsonObject payload)
 	{
-		Request request = new Request.Builder()
-			.url(webhookUrl)
-			.post(RequestBody.create(JSON, gson.toJson(payload)))
-			.build();
+		// C3 fix: Request.Builder.url() throws IllegalArgumentException synchronously for a bad URL,
+		// before enqueue() — catch it here so it doesn't propagate up and kill checkReminders' scheduled task
+		Request request;
+		try
+		{
+			request = new Request.Builder()
+				.url(webhookUrl)
+				.post(RequestBody.create(JSON, gson.toJson(payload)))
+				.build();
+		}
+		catch (IllegalArgumentException e)
+		{
+			log.warn("Invalid Discord webhook URL, skipping notification: {}", webhookUrl);
+			return;
+		}
 
 		okHttpClient.newCall(request).enqueue(new Callback()
 		{
@@ -118,15 +129,5 @@ public class DiscordWebhookClient
 				}
 			}
 		});
-	}
-
-	private static String formatMinutes(int minutes)
-	{
-		if (minutes >= 60 && minutes % 60 == 0)
-		{
-			int hours = minutes / 60;
-			return hours + " hour" + (hours > 1 ? "s" : "");
-		}
-		return minutes + " minute" + (minutes != 1 ? "s" : "");
 	}
 }

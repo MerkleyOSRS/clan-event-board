@@ -1,7 +1,6 @@
 package com.clanevents;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -67,7 +66,8 @@ public class JsonBinClient
 		});
 	}
 
-	public void saveEvents(String binId, String apiKey, ClanEventsData data, Runnable onFailure)
+	// C2 fix: added onSuccess callback so callers can sequence post-save work correctly
+	public void saveEvents(String binId, String apiKey, ClanEventsData data, Runnable onSuccess, Runnable onFailure)
 	{
 		String json = gson.toJson(data);
 		Request request = new Request.Builder()
@@ -93,6 +93,10 @@ public class JsonBinClient
 				{
 					log.debug("JSONBin save returned {}", response.code());
 					onFailure.run();
+				}
+				else
+				{
+					onSuccess.run();
 				}
 			}
 		});

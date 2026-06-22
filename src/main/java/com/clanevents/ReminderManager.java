@@ -8,9 +8,9 @@ import net.runelite.client.chat.QueuedMessage;
 
 import javax.inject.Inject;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 public class ReminderManager
@@ -28,7 +28,9 @@ public class ReminderManager
 	private DiscordWebhookClient discordWebhookClient;
 
 	private volatile List<ClanEvent> events = Collections.emptyList();
-	private final Set<String> firedReminders = new HashSet<>();
+	// C4 fix: ConcurrentHashMap.newKeySet() is thread-safe; firedReminders is written from the executor
+	// thread (checkReminders) and cleared from the client thread (clearFiredReminders via onGameStateChanged)
+	private final Set<String> firedReminders = ConcurrentHashMap.newKeySet();
 
 	public void updateEvents(List<ClanEvent> events)
 	{
@@ -37,34 +39,41 @@ public class ReminderManager
 
 	public void checkReminders()
 	{
-		long nowSeconds = System.currentTimeMillis() / 1000;
-
-		for (ClanEvent event : events)
+		try // C3 fix: uncaught exception from a ScheduledExecutorService task permanently cancels it
 		{
-			for (int reminderMinutes : event.reminders)
+			long nowSeconds = System.currentTimeMillis() / 1000;
+
+			for (ClanEvent event : events)
 			{
-				String key = event.id + ":" + reminderMinutes;
-				if (firedReminders.contains(key))
+				for (int reminderMinutes : event.reminders)
 				{
-					continue;
-				}
+					String key = event.id + ":" + reminderMinutes;
+					if (firedReminders.contains(key))
+					{
+						continue;
+					}
 
-				long reminderTime = event.timestampUtc - (reminderMinutes * 60L);
+					long reminderTime = event.timestampUtc - (reminderMinutes * 60L);
 
-				// Already past (plus a 90s grace window) — mark fired silently so we don't
-				// spam stale reminders on login
-				if (nowSeconds > reminderTime + 90)
-				{
-					firedReminders.add(key);
-					continue;
-				}
+					// Already past (plus a 90s grace window) — mark fired silently so we don't
+					// spam stale reminders on login
+					if (nowSeconds > reminderTime + 90)
+					{
+						firedReminders.add(key);
+						continue;
+					}
 
-				if (nowSeconds >= reminderTime)
-				{
-					firedReminders.add(key);
-					fireReminder(event, reminderMinutes);
+					if (nowSeconds >= reminderTime)
+					{
+						firedReminders.add(key);
+						fireReminder(event, reminderMinutes);
+					}
 				}
 			}
+		}
+		catch (Exception e)
+		{
+			log.warn("Unexpected error in checkReminders", e);
 		}
 	}
 
@@ -75,8 +84,8 @@ public class ReminderManager
 
 	private void fireReminder(ClanEvent event, int minutesBefore)
 	{
-		String timeLabel = formatMinutes(minutesBefore);
-		String message = "[Clan Events] Reminder: \"" + event.title + "\" starts in " + timeLabel + "!";
+		String timeLabel = EventFormatUtils.formatMinutes(minutesBefore); // L2 fix: use shared utility
+		String message = "[Clan Event Board] Reminder: \"" + event.title + "\" starts in " + timeLabel + "!";
 
 		clientThread.invoke(() -> chatMessageManager.queue(QueuedMessage.builder()
 			.type(ChatMessageType.GAMEMESSAGE)
@@ -84,21 +93,11 @@ public class ReminderManager
 			.build()));
 
 		String webhookUrl = config.discordWebhookUrl();
-		if (!webhookUrl.isEmpty())
+		if (webhookUrl != null && !webhookUrl.isEmpty()) // H3 fix: null-check before isEmpty
 		{
 			discordWebhookClient.postReminder(webhookUrl, event, minutesBefore, config.discordPingHere());
 		}
 
 		log.debug("Fired reminder for event {} ({}m before)", event.title, minutesBefore);
-	}
-
-	private static String formatMinutes(int minutes)
-	{
-		if (minutes >= 60 && minutes % 60 == 0)
-		{
-			int hours = minutes / 60;
-			return hours + " hour" + (hours > 1 ? "s" : "");
-		}
-		return minutes + " minute" + (minutes != 1 ? "s" : "");
 	}
 }

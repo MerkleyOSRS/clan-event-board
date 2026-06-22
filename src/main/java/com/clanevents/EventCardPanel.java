@@ -1,5 +1,6 @@
 package com.clanevents;
 
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 
@@ -12,6 +13,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.function.Consumer;
 
+@Slf4j
 public class EventCardPanel extends JPanel
 {
 	private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("EEE dd MMM");

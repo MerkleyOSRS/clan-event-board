@@ -1,5 +1,6 @@
 package com.clanevents;
 
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+@Slf4j
 public class EventCreatePanel extends JPanel
 {
 	private static final Map<String, String> TIMEZONES = new LinkedHashMap<>();
@@ -193,9 +195,19 @@ public class EventCreatePanel extends JPanel
 			statusLabel.setText("Event name is required.");
 			return;
 		}
+		if (title.length() > 80) // M1 fix: Discord embed title limit is 256; 80 keeps card UI readable
+		{
+			statusLabel.setText("Event name must be 80 characters or less.");
+			return;
+		}
 		if (host.isEmpty())
 		{
 			statusLabel.setText("Host is required.");
+			return;
+		}
+		if (host.length() > 50)
+		{
+			statusLabel.setText("Host name must be 50 characters or less.");
 			return;
 		}
 
@@ -211,8 +223,8 @@ public class EventCreatePanel extends JPanel
 		int year = cal.get(Calendar.YEAR);
 		int month = cal.get(Calendar.MONTH) + 1;
 		int day = cal.get(Calendar.DAY_OF_MONTH);
-		int hour = (int) hourSpinner.getValue();
-		int minute = (int) minuteSpinner.getValue();
+		int hour = ((Number) hourSpinner.getValue()).intValue(); // L4 fix: safe unbox for any Number subtype
+		int minute = ((Number) minuteSpinner.getValue()).intValue();
 
 		ZonedDateTime zdt = ZonedDateTime.of(LocalDateTime.of(year, month, day, hour, minute), zone);
 		long epochSeconds = zdt.toInstant().toEpochMilli() / 1000;
@@ -278,7 +290,12 @@ public class EventCreatePanel extends JPanel
 	{
 		spinner.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		spinner.setForeground(Color.WHITE);
-		spinner.getEditor().getComponent(0).setBackground(ColorScheme.DARK_GRAY_COLOR);
-		((JComponent) spinner.getEditor().getComponent(0)).setForeground(Color.WHITE);
+		// L5 fix: use the documented DefaultEditor API rather than relying on getComponent(0) index
+		if (spinner.getEditor() instanceof JSpinner.DefaultEditor)
+		{
+			JTextField tf = ((JSpinner.DefaultEditor) spinner.getEditor()).getTextField();
+			tf.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			tf.setForeground(Color.WHITE);
+		}
 	}
 }
