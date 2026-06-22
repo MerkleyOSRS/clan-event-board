@@ -138,7 +138,6 @@ public class ClanEventsPanel extends PluginPanel
 						EventCardPanel card = new EventCardPanel(event, currentUsername,
 							isHost || canAdminDelete, plugin::rsvpEvent, plugin::deleteEvent);
 						card.setAlignmentX(Component.LEFT_ALIGNMENT);
-						card.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 						eventListPanel.add(card);
 					}
 					catch (Exception ex)

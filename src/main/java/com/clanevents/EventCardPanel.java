@@ -18,7 +18,6 @@ import java.util.function.Consumer;
 @Slf4j
 public class EventCardPanel extends JPanel
 {
-	// "Sat 21 Jun · 8:00 PM BST" — all the scheduling info in one scannable line
 	private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("EEE d MMM  ·  h:mm a z");
 
 	private static final Color TEAL        = new Color(0x1ABC9C);
@@ -28,7 +27,12 @@ public class EventCardPanel extends JPanel
 	private static final Color MUTED       = new Color(0x4A4A4A);
 	private static final Color MUTED_HOVER = new Color(0x5E5E5E);
 	private static final Color CARD_BG     = ColorScheme.DARKER_GRAY_COLOR;
+	private static final Color CARD_BORDER = new Color(0x434343);
 	private static final Color SEPARATOR   = new Color(0x343434);
+
+	// Collapsed outer panel height (px). Includes the 4 px top margin from EmptyBorder.
+	// Enforces a uniform row height across all events regardless of title length.
+	private static final int COLLAPSED_H = 62;
 
 	private final JPanel expandedSection;
 	private final JLabel chevronLbl;
@@ -39,25 +43,27 @@ public class EventCardPanel extends JPanel
 	{
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
-		setBorder(new EmptyBorder(4, 0, 0, 0)); // top gap matches PartyMemberBox rhythm
+		setBorder(new EmptyBorder(4, 0, 0, 0));
+		setMaximumSize(new Dimension(Integer.MAX_VALUE, COLLAPSED_H)); // fixed size when collapsed
 
 		// ── Card shell ────────────────────────────────────────────────────────
 		JPanel card = new JPanel(new BorderLayout());
 		card.setBackground(CARD_BG);
+		// 1px outline defines card bounds; subtle but clear against the list background
+		card.setBorder(BorderFactory.createLineBorder(CARD_BORDER, 1));
 
-		// Teal left accent stripe — provides colour, depth, and click affordance
+		// Teal left accent stripe
 		JPanel stripe = new JPanel();
 		stripe.setBackground(TEAL);
 		stripe.setPreferredSize(new Dimension(3, 0));
 		card.add(stripe, BorderLayout.WEST);
 
-		// Body — everything lives inside here
 		JPanel body = new JPanel(new BorderLayout());
 		body.setBackground(CARD_BG);
-		body.setBorder(new EmptyBorder(8, 9, 8, 8));
+		body.setBorder(new EmptyBorder(6, 8, 6, 8));
 		card.add(body, BorderLayout.CENTER);
 
-		// ── Collapsed header (always visible) ─────────────────────────────────
+		// ── Collapsed header — 2 rows, all info visible at a glance ──────────
 		JPanel headerRows = new JPanel();
 		headerRows.setLayout(new BoxLayout(headerRows, BoxLayout.Y_AXIS));
 		headerRows.setBackground(CARD_BG);
@@ -66,8 +72,8 @@ public class EventCardPanel extends JPanel
 		ZonedDateTime zdt = ZonedDateTime.ofInstant(
 			Instant.ofEpochSecond(event.timestampUtc), ZoneId.systemDefault());
 
-		// Row 1 — primary: event title (left) + RSVP badge (right)
-		JPanel titleRow = new JPanel(new BorderLayout(6, 0));
+		// Row 1 — title (left)  +  [badge]  [▶] (right)
+		JPanel titleRow = new JPanel(new BorderLayout(4, 0));
 		titleRow.setBackground(CARD_BG);
 		titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -77,38 +83,41 @@ public class EventCardPanel extends JPanel
 		titleLbl.putClientProperty("html.disable", Boolean.TRUE);
 		titleRow.add(titleLbl, BorderLayout.CENTER);
 
+		// Badge + chevron sit together so the right edge is always occupied
+		JPanel rightControls = new JPanel();
+		rightControls.setLayout(new BoxLayout(rightControls, BoxLayout.X_AXIS));
+		rightControls.setBackground(CARD_BG);
 		if (!event.rsvps.isEmpty())
 		{
-			titleRow.add(makeBadge(String.valueOf(event.rsvps.size())), BorderLayout.EAST);
+			rightControls.add(makeBadge(String.valueOf(event.rsvps.size())));
+			rightControls.add(Box.createHorizontalStrut(5));
 		}
-		headerRows.add(titleRow);
-		headerRows.add(Box.createVerticalStrut(3));
+		chevronLbl = new JLabel("▶"); // ▶
+		chevronLbl.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 8));
+		chevronLbl.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		rightControls.add(chevronLbl);
+		titleRow.add(rightControls, BorderLayout.EAST);
 
-		// Row 2 — secondary: date · time on one line
+		headerRows.add(titleRow);
+		headerRows.add(Box.createVerticalStrut(4));
+
+		// Row 2 — date · time (left)  +  by host (right, dimmer)
+		JPanel dateRow = new JPanel(new BorderLayout(8, 0));
+		dateRow.setBackground(CARD_BG);
+		dateRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
 		JLabel dtLbl = new JLabel(DT_FMT.format(zdt));
 		dtLbl.setFont(FontManager.getRunescapeSmallFont());
 		dtLbl.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		dtLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-		headerRows.add(dtLbl);
-		headerRows.add(Box.createVerticalStrut(2));
-
-		// Row 3 — tertiary: host (left) + expand chevron (right)
-		JPanel hostRow = new JPanel(new BorderLayout(4, 0));
-		hostRow.setBackground(CARD_BG);
-		hostRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		dateRow.add(dtLbl, BorderLayout.CENTER);
 
 		JLabel hostLbl = new JLabel("by " + event.host);
 		hostLbl.setFont(FontManager.getRunescapeSmallFont());
 		hostLbl.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
 		hostLbl.putClientProperty("html.disable", Boolean.TRUE);
-		hostRow.add(hostLbl, BorderLayout.CENTER);
+		dateRow.add(hostLbl, BorderLayout.EAST);
 
-		// SansSerif for chevron so Unicode triangles render on all systems
-		chevronLbl = new JLabel("▶"); // ▶
-		chevronLbl.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 8));
-		chevronLbl.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-		hostRow.add(chevronLbl, BorderLayout.EAST);
-		headerRows.add(hostRow);
+		headerRows.add(dateRow);
 
 		headerRows.addMouseListener(new MouseAdapter()
 		{
@@ -134,7 +143,6 @@ public class EventCardPanel extends JPanel
 		expandedSection.add(sep);
 		expandedSection.add(Box.createVerticalStrut(8));
 
-		// Attendees list
 		String attendHeader = event.rsvps.isEmpty()
 			? "No attendees yet"
 			: "Attending (" + event.rsvps.size() + ")";
@@ -159,7 +167,6 @@ public class EventCardPanel extends JPanel
 		}
 		expandedSection.add(Box.createVerticalStrut(10));
 
-		// RSVP action button
 		boolean alreadyRsvpd = currentUsername != null && event.rsvps.contains(currentUsername);
 		JButton rsvpBtn = makeButton(
 			alreadyRsvpd ? "Remove RSVP" : "RSVP",
@@ -186,6 +193,8 @@ public class EventCardPanel extends JPanel
 		expanded = !expanded;
 		expandedSection.setVisible(expanded);
 		chevronLbl.setText(expanded ? "▼" : "▶"); // ▼ : ▶
+		// Lift the max-height constraint while expanded so the card can grow freely
+		setMaximumSize(new Dimension(Integer.MAX_VALUE, expanded ? Integer.MAX_VALUE : COLLAPSED_H));
 		revalidate();
 		Container p = getParent();
 		if (p != null)
@@ -194,7 +203,6 @@ public class EventCardPanel extends JPanel
 		}
 	}
 
-	// Rounded pill badge painted by the component itself so we don't need JLayer or extra panels
 	private static JLabel makeBadge(String text)
 	{
 		JLabel badge = new JLabel(text)
@@ -212,14 +220,13 @@ public class EventCardPanel extends JPanel
 		};
 		badge.setBackground(TEAL);
 		badge.setForeground(Color.WHITE);
-		badge.setOpaque(false); // we handle our own background painting
+		badge.setOpaque(false);
 		badge.setFont(FontManager.getRunescapeSmallFont());
 		badge.setBorder(new EmptyBorder(2, 6, 2, 6));
 		badge.setToolTipText("RSVPs");
 		return badge;
 	}
 
-	// Rounded action button with hover colour transition
 	private static JButton makeButton(String label, Color bg, Color hoverBg)
 	{
 		JButton btn = new JButton(label)
@@ -239,7 +246,7 @@ public class EventCardPanel extends JPanel
 		btn.setForeground(Color.WHITE);
 		btn.setFont(FontManager.getRunescapeSmallFont());
 		btn.setBorderPainted(false);
-		btn.setContentAreaFilled(false); // we paint the background ourselves
+		btn.setContentAreaFilled(false);
 		btn.setOpaque(false);
 		btn.setFocusPainted(false);
 		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
