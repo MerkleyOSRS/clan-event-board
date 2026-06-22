@@ -92,6 +92,10 @@ public class ClanEventsPlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 		executor = Executors.newSingleThreadScheduledExecutor();
 
+		// Populate the username/rank cache immediately if the player is already logged in.
+		// onGameStateChanged(LOGGED_IN) won't fire again for an existing session.
+		clientThread.invoke(this::cachePlayerInfo);
+
 		if (isConfigured())
 		{
 			startPolling();
