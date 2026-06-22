@@ -7,6 +7,8 @@ import net.runelite.client.ui.FontManager;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -16,170 +18,241 @@ import java.util.function.Consumer;
 @Slf4j
 public class EventCardPanel extends JPanel
 {
-	private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("EEE dd MMM");
-	private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("h:mm a z");
-	private static final Color TEAL = new Color(0x1ABC9C);
-	private static final Color DELETE_RED = new Color(0xC0392B);
+	// "Sat 21 Jun · 8:00 PM BST" — all the scheduling info in one scannable line
+	private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("EEE d MMM  ·  h:mm a z");
+
+	private static final Color TEAL        = new Color(0x1ABC9C);
+	private static final Color TEAL_HOVER  = new Color(0x16A085);
+	private static final Color RED         = new Color(0xC0392B);
+	private static final Color RED_HOVER   = new Color(0xA93226);
+	private static final Color MUTED       = new Color(0x4A4A4A);
+	private static final Color MUTED_HOVER = new Color(0x5E5E5E);
+	private static final Color CARD_BG     = ColorScheme.DARKER_GRAY_COLOR;
+	private static final Color SEPARATOR   = new Color(0x343434);
 
 	private final JPanel expandedSection;
-	private boolean expanded = false;
+	private final JLabel chevronLbl;
+	private boolean      expanded = false;
 
 	EventCardPanel(ClanEvent event, String currentUsername, boolean canDelete,
 		Consumer<ClanEvent> onRsvp, Consumer<ClanEvent> onDelete)
 	{
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
-		// Top margin between cards — same pattern as PartyMemberBox
-		setBorder(new EmptyBorder(5, 0, 0, 0));
+		setBorder(new EmptyBorder(4, 0, 0, 0)); // top gap matches PartyMemberBox rhythm
 
-		// Inner container — darker card background with internal padding
-		JPanel container = new JPanel(new BorderLayout(0, 0));
-		container.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		container.setBorder(new EmptyBorder(7, 7, 7, 7));
+		// ── Card shell ────────────────────────────────────────────────────────
+		JPanel card = new JPanel(new BorderLayout());
+		card.setBackground(CARD_BG);
 
-		// --- Header (always visible) ---
-		JPanel header = new JPanel(new BorderLayout(4, 0));
-		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		// Teal left accent stripe — provides colour, depth, and click affordance
+		JPanel stripe = new JPanel();
+		stripe.setBackground(TEAL);
+		stripe.setPreferredSize(new Dimension(3, 0));
+		card.add(stripe, BorderLayout.WEST);
 
-		// Left: event info stacked vertically
-		JPanel infoPanel = new JPanel();
-		infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
-		infoPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		// Body — everything lives inside here
+		JPanel body = new JPanel(new BorderLayout());
+		body.setBackground(CARD_BG);
+		body.setBorder(new EmptyBorder(8, 9, 8, 8));
+		card.add(body, BorderLayout.CENTER);
 
-		JLabel titleLabel = new JLabel(event.title);
-		titleLabel.setFont(FontManager.getRunescapeBoldFont());
-		titleLabel.setForeground(Color.WHITE);
-		titleLabel.putClientProperty("html.disable", Boolean.TRUE);
+		// ── Collapsed header (always visible) ─────────────────────────────────
+		JPanel headerRows = new JPanel();
+		headerRows.setLayout(new BoxLayout(headerRows, BoxLayout.Y_AXIS));
+		headerRows.setBackground(CARD_BG);
+		headerRows.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
 		ZonedDateTime zdt = ZonedDateTime.ofInstant(
 			Instant.ofEpochSecond(event.timestampUtc), ZoneId.systemDefault());
 
-		JLabel dateLabel = new JLabel(DATE_FMT.format(zdt));
-		dateLabel.setFont(FontManager.getRunescapeSmallFont());
-		dateLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		// Row 1 — primary: event title (left) + RSVP badge (right)
+		JPanel titleRow = new JPanel(new BorderLayout(6, 0));
+		titleRow.setBackground(CARD_BG);
+		titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		JLabel timeLabel = new JLabel(TIME_FMT.format(zdt));
-		timeLabel.setFont(FontManager.getRunescapeSmallFont());
-		timeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel titleLbl = new JLabel(event.title);
+		titleLbl.setFont(FontManager.getRunescapeBoldFont());
+		titleLbl.setForeground(Color.WHITE);
+		titleLbl.putClientProperty("html.disable", Boolean.TRUE);
+		titleRow.add(titleLbl, BorderLayout.CENTER);
 
-		JLabel hostLabel = new JLabel("Host: " + event.host);
-		hostLabel.setFont(FontManager.getRunescapeSmallFont());
-		hostLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		hostLabel.putClientProperty("html.disable", Boolean.TRUE);
+		if (!event.rsvps.isEmpty())
+		{
+			titleRow.add(makeBadge(String.valueOf(event.rsvps.size())), BorderLayout.EAST);
+		}
+		headerRows.add(titleRow);
+		headerRows.add(Box.createVerticalStrut(3));
 
-		infoPanel.add(titleLabel);
-		infoPanel.add(Box.createVerticalStrut(2));
-		infoPanel.add(dateLabel);
-		infoPanel.add(timeLabel);
-		infoPanel.add(Box.createVerticalStrut(2));
-		infoPanel.add(hostLabel);
+		// Row 2 — secondary: date · time on one line
+		JLabel dtLbl = new JLabel(DT_FMT.format(zdt));
+		dtLbl.setFont(FontManager.getRunescapeSmallFont());
+		dtLbl.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		dtLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		headerRows.add(dtLbl);
+		headerRows.add(Box.createVerticalStrut(2));
 
-		// Right: RSVP count
-		JLabel countLabel = new JLabel(event.rsvps.size() + " going");
-		countLabel.setFont(FontManager.getRunescapeSmallFont());
-		countLabel.setForeground(event.rsvps.isEmpty() ? ColorScheme.MEDIUM_GRAY_COLOR : TEAL);
-		countLabel.setVerticalAlignment(SwingConstants.TOP);
+		// Row 3 — tertiary: host (left) + expand chevron (right)
+		JPanel hostRow = new JPanel(new BorderLayout(4, 0));
+		hostRow.setBackground(CARD_BG);
+		hostRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		header.add(infoPanel, BorderLayout.CENTER);
-		header.add(countLabel, BorderLayout.EAST);
+		JLabel hostLbl = new JLabel("by " + event.host);
+		hostLbl.setFont(FontManager.getRunescapeSmallFont());
+		hostLbl.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		hostLbl.putClientProperty("html.disable", Boolean.TRUE);
+		hostRow.add(hostLbl, BorderLayout.CENTER);
 
-		// Click header to expand/collapse
-		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		header.addMouseListener(new java.awt.event.MouseAdapter()
+		// SansSerif for chevron so Unicode triangles render on all systems
+		chevronLbl = new JLabel("▶"); // ▶
+		chevronLbl.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 8));
+		chevronLbl.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		hostRow.add(chevronLbl, BorderLayout.EAST);
+		headerRows.add(hostRow);
+
+		headerRows.addMouseListener(new MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
+			public void mouseClicked(MouseEvent e)
 			{
 				toggleExpanded();
 			}
 		});
+		body.add(headerRows, BorderLayout.NORTH);
 
-		// --- Expanded section ---
+		// ── Expanded section ──────────────────────────────────────────────────
 		expandedSection = new JPanel();
 		expandedSection.setLayout(new BoxLayout(expandedSection, BoxLayout.Y_AXIS));
-		expandedSection.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		expandedSection.setBorder(new EmptyBorder(6, 0, 0, 0));
+		expandedSection.setBackground(CARD_BG);
+		expandedSection.setBorder(new EmptyBorder(10, 0, 0, 0));
 		expandedSection.setVisible(false);
 
-		// Thin separator line
 		JSeparator sep = new JSeparator();
-		sep.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+		sep.setForeground(SEPARATOR);
+		sep.setBackground(CARD_BG);
 		sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
 		expandedSection.add(sep);
-		expandedSection.add(Box.createVerticalStrut(6));
-
-		// Attendees
-		JLabel attendeesTitle = new JLabel("Attending (" + event.rsvps.size() + ")");
-		attendeesTitle.setFont(FontManager.getRunescapeSmallFont());
-		attendeesTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		expandedSection.add(attendeesTitle);
-		expandedSection.add(Box.createVerticalStrut(3));
-
-		if (event.rsvps.isEmpty())
-		{
-			JLabel noneLabel = new JLabel("No one yet — be the first!");
-			noneLabel.setFont(FontManager.getRunescapeSmallFont());
-			noneLabel.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
-			expandedSection.add(noneLabel);
-		}
-		else
-		{
-			for (String name : event.rsvps)
-			{
-				JLabel nameLabel = new JLabel("• " + name);
-				nameLabel.setFont(FontManager.getRunescapeSmallFont());
-				nameLabel.setForeground(Color.WHITE);
-				nameLabel.putClientProperty("html.disable", Boolean.TRUE);
-				expandedSection.add(nameLabel);
-			}
-		}
-
 		expandedSection.add(Box.createVerticalStrut(8));
 
-		// RSVP button
+		// Attendees list
+		String attendHeader = event.rsvps.isEmpty()
+			? "No attendees yet"
+			: "Attending (" + event.rsvps.size() + ")";
+		JLabel attendTitle = new JLabel(attendHeader);
+		attendTitle.setFont(FontManager.getRunescapeSmallFont());
+		attendTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		attendTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+		expandedSection.add(attendTitle);
+
+		if (!event.rsvps.isEmpty())
+		{
+			expandedSection.add(Box.createVerticalStrut(4));
+			for (String name : event.rsvps)
+			{
+				JLabel nameLbl = new JLabel("• " + name); // •
+				nameLbl.setFont(FontManager.getRunescapeSmallFont());
+				nameLbl.setForeground(Color.WHITE);
+				nameLbl.putClientProperty("html.disable", Boolean.TRUE);
+				nameLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+				expandedSection.add(nameLbl);
+			}
+		}
+		expandedSection.add(Box.createVerticalStrut(10));
+
+		// RSVP action button
 		boolean alreadyRsvpd = currentUsername != null && event.rsvps.contains(currentUsername);
-		JButton rsvpBtn = new JButton(alreadyRsvpd ? "Remove RSVP" : "RSVP");
-		styleButton(rsvpBtn, alreadyRsvpd ? ColorScheme.MEDIUM_GRAY_COLOR : TEAL);
+		JButton rsvpBtn = makeButton(
+			alreadyRsvpd ? "Remove RSVP" : "RSVP",
+			alreadyRsvpd ? MUTED : TEAL,
+			alreadyRsvpd ? MUTED_HOVER : TEAL_HOVER
+		);
 		rsvpBtn.addActionListener(e -> onRsvp.accept(event));
 		expandedSection.add(rsvpBtn);
 
-		// Delete button
 		if (canDelete)
 		{
 			expandedSection.add(Box.createVerticalStrut(4));
-			JButton deleteBtn = new JButton("Delete Event");
-			styleButton(deleteBtn, DELETE_RED);
+			JButton deleteBtn = makeButton("Delete Event", RED, RED_HOVER);
 			deleteBtn.addActionListener(e -> onDelete.accept(event));
 			expandedSection.add(deleteBtn);
 		}
 
-		container.add(header, BorderLayout.CENTER);
-		container.add(expandedSection, BorderLayout.SOUTH);
-
-		add(container, BorderLayout.CENTER);
+		body.add(expandedSection, BorderLayout.CENTER);
+		add(card, BorderLayout.CENTER);
 	}
 
 	private void toggleExpanded()
 	{
 		expanded = !expanded;
 		expandedSection.setVisible(expanded);
+		chevronLbl.setText(expanded ? "▼" : "▶"); // ▼ : ▶
 		revalidate();
-		Container parent = getParent();
-		if (parent != null)
+		Container p = getParent();
+		if (p != null)
 		{
-			parent.revalidate();
+			p.revalidate();
 		}
 	}
 
-	private static void styleButton(JButton btn, Color bg)
+	// Rounded pill badge painted by the component itself so we don't need JLayer or extra panels
+	private static JLabel makeBadge(String text)
 	{
+		JLabel badge = new JLabel(text)
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setColor(getBackground());
+				g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+				g2.dispose();
+				super.paintComponent(g);
+			}
+		};
+		badge.setBackground(TEAL);
+		badge.setForeground(Color.WHITE);
+		badge.setOpaque(false); // we handle our own background painting
+		badge.setFont(FontManager.getRunescapeSmallFont());
+		badge.setBorder(new EmptyBorder(2, 6, 2, 6));
+		badge.setToolTipText("RSVPs");
+		return badge;
+	}
+
+	// Rounded action button with hover colour transition
+	private static JButton makeButton(String label, Color bg, Color hoverBg)
+	{
+		JButton btn = new JButton(label)
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setColor(getBackground());
+				g2.fillRoundRect(0, 0, getWidth(), getHeight(), 6, 6);
+				g2.dispose();
+				super.paintComponent(g);
+			}
+		};
 		btn.setBackground(bg);
 		btn.setForeground(Color.WHITE);
 		btn.setFont(FontManager.getRunescapeSmallFont());
 		btn.setBorderPainted(false);
+		btn.setContentAreaFilled(false); // we paint the background ourselves
+		btn.setOpaque(false);
 		btn.setFocusPainted(false);
 		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		btn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		btn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		btn.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e) { btn.setBackground(hoverBg); }
+
+			@Override
+			public void mouseExited(MouseEvent e)  { btn.setBackground(bg); }
+		});
+		return btn;
 	}
 }

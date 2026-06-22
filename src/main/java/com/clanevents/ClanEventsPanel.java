@@ -8,20 +8,25 @@ import net.runelite.client.ui.PluginPanel;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.List;
 
 @Slf4j
 public class ClanEventsPanel extends PluginPanel
 {
-	private static final String CARD_LIST = "list";
+	private static final String CARD_LIST   = "list";
 	private static final String CARD_CREATE = "create";
+	private static final Color  TEAL        = new Color(0x1ABC9C);
+	private static final Color  TEAL_HOVER  = new Color(0x16A085);
+	private static final Color  ERROR_COLOR = new Color(0xE74C3C);
+	private static final Color  SEPARATOR   = new Color(0x2E2E2E);
 
-	private final CardLayout cardLayout = new CardLayout();
-	private final JPanel cardContainer = new JPanel(cardLayout);
-
-	private final JPanel listView; // L3 fix: field reference so showCreateForm can safely remove non-listView components
-	private final JPanel eventListPanel = new JPanel();
-	private final JLabel statusLabel = new JLabel();
+	private final CardLayout cardLayout    = new CardLayout();
+	private final JPanel     cardContainer = new JPanel(cardLayout);
+	private final JPanel     listView;       // field so showCreateForm can remove non-listView components safely
+	private final JPanel     eventListPanel = new JPanel();
+	private final JLabel     statusLabel    = new JLabel();
 	private EventCreatePanel createPanel;
 
 	private final ClanEventsPlugin plugin;
@@ -36,9 +41,9 @@ public class ClanEventsPanel extends PluginPanel
 
 		cardContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-		// --- List view ---
-		listView = new JPanel(new BorderLayout(0, 4));
-		listView.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		// ── List view ─────────────────────────────────────────────────────────
+		listView = new JPanel(new BorderLayout());
+		listView.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		listView.add(buildListHeader(), BorderLayout.NORTH);
 
@@ -50,16 +55,15 @@ public class ClanEventsPanel extends PluginPanel
 		scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-
 		listView.add(scroll, BorderLayout.CENTER);
 
+		// Status bar — errors appear here; invisible when empty
 		statusLabel.setFont(FontManager.getRunescapeSmallFont());
 		statusLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		statusLabel.setBorder(new EmptyBorder(4, 8, 4, 8));
+		statusLabel.setBorder(new EmptyBorder(4, 10, 6, 10));
 		listView.add(statusLabel, BorderLayout.SOUTH);
 
 		cardContainer.add(listView, CARD_LIST);
-
 		add(cardContainer, BorderLayout.CENTER);
 
 		showLoading();
@@ -67,56 +71,72 @@ public class ClanEventsPanel extends PluginPanel
 
 	private JPanel buildListHeader()
 	{
+		// Wrapper so we can add the separator below the header without affecting layout
+		JPanel wrapper = new JPanel(new BorderLayout());
+		wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
 		JPanel header = new JPanel(new BorderLayout());
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		header.setBorder(new EmptyBorder(8, 8, 8, 8));
+		header.setBorder(new EmptyBorder(10, 10, 10, 8));
 
-		JLabel title = new JLabel("Clan Event Board"); // L1 fix: match plugin display name
-		title.setForeground(Color.WHITE);
-		title.setFont(FontManager.getRunescapeBoldFont());
+		JLabel titleLbl = new JLabel("Clan Event Board");
+		titleLbl.setForeground(Color.WHITE);
+		titleLbl.setFont(FontManager.getRunescapeBoldFont());
 
+		// "+" button — teal with hover feedback, clearly interactive
 		JButton addBtn = new JButton("+");
 		addBtn.setToolTipText("Create new event");
-		addBtn.setFont(new Font(addBtn.getFont().getName(), Font.BOLD, 16));
-		addBtn.setForeground(new Color(0x1ABC9C));
+		addBtn.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 18));
+		addBtn.setForeground(TEAL);
 		addBtn.setBorderPainted(false);
 		addBtn.setContentAreaFilled(false);
+		addBtn.setFocusPainted(false);
 		addBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		addBtn.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e) { addBtn.setForeground(TEAL_HOVER); }
+
+			@Override
+			public void mouseExited(MouseEvent e)  { addBtn.setForeground(TEAL); }
+		});
 		addBtn.addActionListener(e -> showCreateForm());
 
-		header.add(title, BorderLayout.WEST);
+		header.add(titleLbl, BorderLayout.WEST);
 		header.add(addBtn, BorderLayout.EAST);
-		return header;
+
+		// Thin separator provides a clean break between header chrome and scrollable content
+		JSeparator sep = new JSeparator();
+		sep.setForeground(SEPARATOR);
+		sep.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		wrapper.add(header, BorderLayout.CENTER);
+		wrapper.add(sep, BorderLayout.SOUTH);
+		return wrapper;
 	}
 
-	// C1 fix: canAdminDelete passed in as a pre-computed parameter instead of calling client API from EDT
 	public void setEvents(List<ClanEvent> events, String currentUsername, boolean canAdminDelete)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
 			eventListPanel.removeAll();
-			statusLabel.setText("");
+			statusLabel.setText(""); // clear any previous error
+			statusLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 
 			if (events.isEmpty())
 			{
-				JLabel empty = new JLabel("No upcoming events. Press + to create one.");
-				empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-				empty.setFont(FontManager.getRunescapeSmallFont());
-				empty.setBorder(new EmptyBorder(12, 8, 0, 8));
-				empty.setAlignmentX(Component.LEFT_ALIGNMENT);
-				eventListPanel.add(empty);
+				eventListPanel.add(buildEmptyState("No upcoming events.", "Press + to create one."));
 			}
 			else
 			{
 				for (ClanEvent event : events)
 				{
-					try // L6 fix: catch card-construction errors so one bad event doesn't blank the whole list
+					try
 					{
 						boolean isHost = currentUsername != null && event.host != null
 							&& event.host.equalsIgnoreCase(currentUsername);
-						boolean canDelete = isHost || canAdminDelete;
-						EventCardPanel card = new EventCardPanel(event, currentUsername, canDelete,
-							plugin::rsvpEvent, plugin::deleteEvent);
+						EventCardPanel card = new EventCardPanel(event, currentUsername,
+							isHost || canAdminDelete, plugin::rsvpEvent, plugin::deleteEvent);
 						card.setAlignmentX(Component.LEFT_ALIGNMENT);
 						card.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 						eventListPanel.add(card);
@@ -138,11 +158,7 @@ public class ClanEventsPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			eventListPanel.removeAll();
-			JLabel loading = new JLabel("Loading events...");
-			loading.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			loading.setFont(FontManager.getRunescapeSmallFont());
-			loading.setBorder(new EmptyBorder(12, 8, 0, 8));
-			eventListPanel.add(loading);
+			eventListPanel.add(buildEmptyState("Loading events...", null));
 			eventListPanel.revalidate();
 			eventListPanel.repaint();
 		});
@@ -153,12 +169,9 @@ public class ClanEventsPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			eventListPanel.removeAll();
-			JLabel msg = new JLabel("<html><center>Configure your JSONBin<br>credentials in Plugin Settings.</center></html>");
-			msg.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			msg.setFont(FontManager.getRunescapeSmallFont());
-			msg.setBorder(new EmptyBorder(12, 8, 0, 8));
-			msg.setHorizontalAlignment(SwingConstants.CENTER);
-			eventListPanel.add(msg);
+			eventListPanel.add(buildEmptyState(
+				"Configuration required.",
+				"Add your JSONBin credentials in Plugin Settings."));
 			eventListPanel.revalidate();
 			eventListPanel.repaint();
 		});
@@ -166,7 +179,11 @@ public class ClanEventsPanel extends PluginPanel
 
 	public void showError(String message)
 	{
-		SwingUtilities.invokeLater(() -> statusLabel.setText(message));
+		SwingUtilities.invokeLater(() ->
+		{
+			statusLabel.setForeground(ERROR_COLOR);
+			statusLabel.setText(message);
+		});
 	}
 
 	private void showCreateForm()
@@ -183,7 +200,7 @@ public class ClanEventsPanel extends PluginPanel
 			this::showList
 		);
 
-		// L3 fix: iterate over a snapshot array rather than relying on component index order
+		// Iterate over snapshot array — avoids relying on component index ordering
 		for (Component c : cardContainer.getComponents())
 		{
 			if (c != listView)
@@ -198,5 +215,37 @@ public class ClanEventsPanel extends PluginPanel
 	private void showList()
 	{
 		cardLayout.show(cardContainer, CARD_LIST);
+	}
+
+	// Reusable centered state view (empty, loading, config-required)
+	private static JPanel buildEmptyState(String primary, String secondary)
+	{
+		JPanel wrapper = new JPanel(new GridBagLayout()); // GridBagLayout centers child within available space
+		wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+
+		JPanel inner = new JPanel();
+		inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+		inner.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		JLabel primaryLbl = new JLabel(primary);
+		primaryLbl.setFont(FontManager.getRunescapeSmallFont());
+		primaryLbl.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		primaryLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
+		inner.add(primaryLbl);
+
+		if (secondary != null)
+		{
+			inner.add(Box.createVerticalStrut(4));
+			JLabel secondaryLbl = new JLabel(secondary);
+			secondaryLbl.setFont(FontManager.getRunescapeSmallFont());
+			secondaryLbl.setForeground(ColorScheme.MEDIUM_GRAY_COLOR);
+			secondaryLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
+			inner.add(secondaryLbl);
+		}
+
+		wrapper.add(inner);
+		return wrapper;
 	}
 }
